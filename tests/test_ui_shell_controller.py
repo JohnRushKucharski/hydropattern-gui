@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hydropattern_gui.runner_service import RunResult
+from hydropattern_gui.runner_service import LogCallback, RunOptions, RunResult
 from hydropattern_gui.ui_shell import (
     CharacteristicRowState,
     FormValidationError,
@@ -18,14 +18,22 @@ class _FakeRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, Path, object]] = []
 
-    def run(self, config_path: str, options: object, on_output: object, cwd: Path) -> RunResult:
-        self.calls.append((config_path, options, cwd, on_output))
-        if callable(on_output):
+    def run(
+        self,
+        config_path: str | Path,
+        options: RunOptions | None = None,
+        on_output: LogCallback | None = None,
+        cwd: str | Path | None = None,
+    ) -> RunResult:
+        config_path_str = str(config_path)
+        run_cwd = Path(cwd).resolve() if cwd is not None else Path.cwd()
+        self.calls.append((config_path_str, options, run_cwd, on_output))
+        if on_output is not None:
             on_output("stdout", "line-1\n")
             on_output("stderr", "line-2\n")
         return RunResult(
-            command=["hydropattern", "run", config_path],
-            cwd=cwd,
+            command=["hydropattern", "run", config_path_str],
+            cwd=run_cwd,
             exit_code=0,
             cancelled=False,
             stdout="line-1\n",
