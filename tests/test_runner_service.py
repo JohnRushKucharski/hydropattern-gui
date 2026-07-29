@@ -114,12 +114,39 @@ def test_cancel_terminates_process_tree(monkeypatch: pytest.MonkeyPatch) -> None
     assert result.exit_code == 130
 
 
+def test_build_command_includes_fillin_flag() -> None:
+    runner = HydropatternRunner(executable="hydropattern")
+    command = runner.build_command(
+        "cfg.toml",
+        RunOptions(fillin=True),
+    )
+    assert command == ["hydropattern", "run", "cfg.toml", "--fillin"]
+
+
+def test_build_command_includes_no_fillin_flag() -> None:
+    runner = HydropatternRunner(executable="hydropattern")
+    command = runner.build_command(
+        "cfg.toml",
+        RunOptions(fillin=False),
+    )
+    assert command == ["hydropattern", "run", "cfg.toml", "--no-fillin"]
+
+
 def test_run_toml_options_conflict_raises() -> None:
     runner = HydropatternRunner()
     with pytest.raises(ValueError):
         runner.build_command(
             "cfg.toml",
             RunOptions(run_toml_options=True, output_directory="out"),
+        )
+
+
+def test_run_toml_options_conflicts_with_fillin() -> None:
+    runner = HydropatternRunner()
+    with pytest.raises(ValueError):
+        runner.build_command(
+            "cfg.toml",
+            RunOptions(run_toml_options=True, fillin=True),
         )
 
 

@@ -27,6 +27,7 @@ class RunOptions:
     threshold: float | None = None
     color_map: str | None = None
     color_map_ticks: list[float] | None = None
+    fillin: bool | None = None
     run_toml_options: bool = False
 
 
@@ -119,6 +120,8 @@ class HydropatternRunner:
         if opts.color_map_ticks is not None:
             for tick in opts.color_map_ticks:
                 command.extend(["--color-map-ticks", str(tick)])
+        if opts.fillin is not None:
+            command.append("--fillin" if opts.fillin else "--no-fillin")
         if opts.run_toml_options:
             command.append("--run-toml-options")
         return command
@@ -186,6 +189,7 @@ class InProcessHydropatternRunner:
                     threshold=opts.threshold,
                     color_map=opts.color_map,
                     color_map_ticks=opts.color_map_ticks,
+                    fillin=opts.fillin,
                     run_toml_options=opts.run_toml_options,
                 )
         except SystemExit as exc:
@@ -218,6 +222,7 @@ def _has_explicit_output_options(options: RunOptions) -> bool:
             options.threshold,
             options.color_map,
             options.color_map_ticks,
+            options.fillin,
         )
     )
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tomli_w
+from hydropattern.parsers import ClimateCanvasPlotOptions, PlotOptions
 
 MetricMode = Literal["portion", "percentage", "return_period"]
 DumpMode = Literal["minimal", "complete"]
@@ -57,25 +58,6 @@ class ComponentConfig:
 @dataclass(frozen=True)
 class MetricOptions:
     mode: MetricMode = "portion"
-
-
-@dataclass(frozen=True)
-class ClimateCanvasPlotOptions:
-    interpolate: bool = True
-    show: bool = False
-    title: str | None = None
-    xlabel: str = "Precipitation Delta (%)"
-    ylabel: str = "Temperature Delta (C)"
-    zlabel: str | None = None
-    threshold: float | None = None
-    color_map: str = "RdBu"
-    color_map_ticks: list[float] | None = None
-
-
-@dataclass(frozen=True)
-class PlotOptions:
-    enabled: bool = False
-    climate_canvas: ClimateCanvasPlotOptions = field(default_factory=ClimateCanvasPlotOptions)
 
 
 @dataclass(frozen=True)
@@ -187,6 +169,8 @@ def _output_to_dict(config: OutputOptions, include_defaults: bool) -> dict[str, 
         climate_canvas_data["color_map"] = config.plot.climate_canvas.color_map
     if config.plot.climate_canvas.color_map_ticks is not None:
         climate_canvas_data["color_map_ticks"] = config.plot.climate_canvas.color_map_ticks
+    if include_defaults or config.plot.climate_canvas.fillin is not False:
+        climate_canvas_data["fillin"] = config.plot.climate_canvas.fillin
 
     plot_data: dict[str, Any] = {}
     if include_defaults or config.plot.enabled is not False:
@@ -301,6 +285,7 @@ def _parse_climate_canvas(section: Any) -> ClimateCanvasPlotOptions:
         "threshold",
         "color_map",
         "color_map_ticks",
+        "fillin",
     }
     unknown_keys = set(section) - allowed
     if unknown_keys:
@@ -333,6 +318,7 @@ def _parse_climate_canvas(section: Any) -> ClimateCanvasPlotOptions:
         threshold=float(threshold) if threshold is not None else None,
         color_map=_optional_str_default(section, "color_map", "RdBu"),
         color_map_ticks=color_map_ticks,
+        fillin=_optional_bool(section, "fillin", False),
     )
 
 

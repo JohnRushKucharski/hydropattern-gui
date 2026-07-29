@@ -51,6 +51,7 @@ def _sample_config() -> HydropatternConfig:
                     threshold=0.5,
                     color_map="RdBu",
                     color_map_ticks=[-2.0, 0.0, 2.0],
+                    fillin=True,
                 ),
             ),
         ),
