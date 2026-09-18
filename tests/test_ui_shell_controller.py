@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from hydropattern_gui.runner_service import LogCallback, RunOptions, RunResult
-from hydropattern_gui.ui_shell import (
+from hydropattern_gui.gui_form import (
     CharacteristicRowState,
     FormValidationError,
-    GuiController,
     GuiFormState,
 )
+from hydropattern_gui.runner_service import LogCallback, RunOptions, RunResult
+from hydropattern_gui.ui_shell import GuiController
 
 
 class _FakeRunner:
