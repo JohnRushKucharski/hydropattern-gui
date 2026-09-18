@@ -177,11 +177,11 @@ def config_from_form_state(state: GuiFormState) -> HydropatternConfig:
         ),
         components={
             component_name: ComponentConfig(
-                timing=cast(list[object] | None, characteristic_kwargs["timing"]),
-                magnitude=cast(list[object] | None, characteristic_kwargs["magnitude"]),
-                duration=cast(list[object] | None, characteristic_kwargs["duration"]),
-                rate_of_change=cast(list[object] | None, characteristic_kwargs["rate_of_change"]),
-                frequency=cast(list[object] | None, characteristic_kwargs["frequency"]),
+                timing=characteristic_kwargs["timing"],
+                magnitude=characteristic_kwargs["magnitude"],
+                duration=characteristic_kwargs["duration"],
+                rate_of_change=characteristic_kwargs["rate_of_change"],
+                frequency=characteristic_kwargs["frequency"],
                 verbose=state.component_verbose,
                 success_pattern=state.component_success_pattern,
                 characteristic_order=tuple(characteristic_order),

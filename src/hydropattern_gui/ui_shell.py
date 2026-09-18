@@ -7,7 +7,7 @@ import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Protocol, cast
+from typing import Protocol, cast
 
 from hydropattern_gui.config_model import (
     DumpMode,
@@ -29,11 +29,11 @@ from hydropattern_gui.gui_form import (
 from hydropattern_gui.release_info import build_about_text
 from hydropattern_gui.runner_service import (
     InProcessHydropatternRunner,
+    LogCallback,
+    LogChannel,
     RunOptions,
     RunResult,
 )
-
-LogCallback = Callable[[str, str], None]
 
 
 class RunnerBackend(Protocol):
@@ -127,6 +127,18 @@ class HydropatternGuiApp:
     def _build_ui(self) -> None:
         self._root.title("hydropattern-gui")
         self._root.geometry("1100x850")
+        container = self._build_scrollable_container()
+        self._build_timeseries_section(container)
+        self._build_component_section(container)
+        self._build_output_section(container)
+        self._build_climate_section(container)
+        self._build_preview_section(container)
+        self._build_save_section(container)
+        self._build_run_section(container)
+        self._set_log_placeholder()
+        self._update_characteristic_row_states()
+
+    def _build_scrollable_container(self) -> ttk.Frame:
         outer = ttk.Frame(self._root, padding=10)
         outer.pack(fill=tk.BOTH, expand=True)
         canvas = tk.Canvas(outer, highlightthickness=0)
@@ -154,7 +166,9 @@ class HydropatternGuiApp:
         container.bind("<Configure>", _on_container_configure)
         canvas.bind("<Configure>", _on_canvas_configure)
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        return container
 
+    def _build_timeseries_section(self, container: ttk.Frame) -> None:
         ts_frame = ttk.LabelFrame(container, text="Timeseries", padding=8)
         ts_frame.pack(fill=tk.X)
         _row_labeled_entry(ts_frame, 0, "Path", self._path_var, width=80)
@@ -165,6 +179,7 @@ class HydropatternGuiApp:
         _row_labeled_entry(ts_frame, 2, "First day of WY", self._first_day_var, width=8)
         _row_labeled_entry(ts_frame, 3, "Sheet", self._sheet_name_var, width=12)
 
+    def _build_component_section(self, container: ttk.Frame) -> None:
         component_frame = ttk.LabelFrame(container, text="Component editor", padding=8)
         component_frame.pack(fill=tk.X, pady=(8, 0))
         _row_labeled_entry(component_frame, 0, "Component", self._component_name_var, width=30)
@@ -199,6 +214,7 @@ class HydropatternGuiApp:
             self._characteristic_widgets.append((kind_box, metrics_entry))
             metrics_var.trace_add("write", self._on_characteristic_metrics_changed)
 
+    def _build_output_section(self, container: ttk.Frame) -> None:
         output_frame = ttk.LabelFrame(container, text="Output / Metric", padding=8)
         output_frame.pack(fill=tk.X, pady=(8, 0))
         _row_labeled_entry(output_frame, 0, "Output dir", self._output_dir_var, width=80)
@@ -222,6 +238,7 @@ class HydropatternGuiApp:
             width=20,
         ).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
 
+    def _build_climate_section(self, container: ttk.Frame) -> None:
         climate_frame = ttk.LabelFrame(container, text="Output climate-canvas", padding=8)
         climate_frame.pack(fill=tk.X, pady=(8, 0))
         ttk.Checkbutton(climate_frame, text="Plot enabled", variable=self._plot_enabled_var).grid(
@@ -251,6 +268,7 @@ class HydropatternGuiApp:
             width=45,
         )
 
+    def _build_preview_section(self, container: ttk.Frame) -> None:
         button_row_top = ttk.Frame(container)
         button_row_top.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(
@@ -264,6 +282,7 @@ class HydropatternGuiApp:
         self._preview_text = tk.Text(container, height=12, wrap=tk.NONE)
         self._preview_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
+    def _build_save_section(self, container: ttk.Frame) -> None:
         save_row = ttk.Frame(container)
         save_row.pack(fill=tk.X, pady=(8, 0))
         _row_labeled_entry(save_row, 0, "TOML file path", self._toml_path_var, width=90)
@@ -271,6 +290,7 @@ class HydropatternGuiApp:
             row=0, column=2, sticky=tk.W, padx=4, pady=4
         )
 
+    def _build_run_section(self, container: ttk.Frame) -> None:
         run_row = ttk.Frame(container)
         run_row.pack(fill=tk.X, pady=(8, 0))
         self._run_button = ttk.Button(run_row, text="Run", command=self._on_run)
@@ -280,8 +300,6 @@ class HydropatternGuiApp:
 
         self._log_text = tk.Text(container, height=8, wrap=tk.NONE)
         self._log_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
-        self._set_log_placeholder()
-        self._update_characteristic_row_states()
 
     def _collect_state(self) -> GuiFormState:
         rows: list[CharacteristicRowState] = []
@@ -477,7 +495,7 @@ class HydropatternGuiApp:
                 metrics_var.set("")
 
     def _run_worker(self, state: GuiFormState) -> None:
-        def on_log(channel: str, line: str) -> None:
+        def on_log(channel: LogChannel, line: str) -> None:
             self._event_queue.put(("log", f"[{channel}] {line}"))
 
         try:
