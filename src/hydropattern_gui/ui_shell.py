@@ -133,25 +133,7 @@ class GuiController:
             temp_path = Path(temp_file.name)
         try:
             write_config_toml(temp_path, config, mode="minimal")
-            run_options = RunOptions(
-                output_directory=state.output_directory.strip() or None,
-                plot=state.plot_enabled,
-                excel=state.excel,
-                overwrite=state.overwrite,
-                interp=state.climate_interpolate,
-                show=state.climate_show,
-                threshold=float(state.climate_threshold.strip())
-                if state.climate_threshold.strip()
-                else None,
-                color_map=state.climate_color_map.strip() or None,
-                color_map_ticks=_parse_ticks(
-                    state.climate_color_map_ticks.strip(),
-                    field_name="output.plot.climate-canvas.color_map_ticks",
-                )
-                if state.climate_color_map_ticks.strip()
-                else None,
-                run_toml_options=False,
-            )
+            run_options = _run_options_from_config(config)
             return self._runner.run(
                 temp_path.name,
                 options=run_options,
@@ -161,6 +143,26 @@ class GuiController:
         finally:
             if temp_path.exists():
                 temp_path.unlink()
+
+
+def _run_options_from_config(config: HydropatternConfig) -> RunOptions:
+    """Build RunOptions from the already-validated config, so a run always
+    uses the exact same values written to the TOML file (no re-parsing of
+    raw form strings, which could silently diverge)."""
+    output = config.output
+    climate = output.plot.climate_canvas
+    return RunOptions(
+        output_directory=output.directory,
+        plot=output.plot.enabled,
+        excel=output.excel,
+        overwrite=output.overwrite,
+        interp=climate.interpolate,
+        show=climate.show,
+        threshold=climate.threshold,
+        color_map=climate.color_map,
+        color_map_ticks=climate.color_map_ticks,
+        run_toml_options=False,
+    )
 
 
 def config_from_form_state(state: GuiFormState) -> HydropatternConfig:
