@@ -176,6 +176,28 @@ def test_run_wires_runner_and_streams_logs(tmp_path: Path) -> None:
     assert called_cwd == tmp_path
 
 
+def test_run_options_match_validated_config_not_raw_state(tmp_path: Path) -> None:
+    """RunOptions must be derived from the already-validated config, not re-parsed
+    from raw form state a second time. A blank color map field defaults to "RdBu"
+    in the validated config; RunOptions must carry that same default rather than
+    None (which would silently diverge from the TOML written for this run)."""
+    data_path = tmp_path / "input.csv"
+    data_path.write_text("time,s1\n2000-01-01,1\n", encoding="utf-8")
+    state = _state()
+    state.timeseries_path = str(data_path)
+    state.output_directory = "out"
+    state.climate_color_map = ""  # blank -> config defaults to "RdBu"
+
+    runner = _FakeRunner()
+    controller = GuiController(runner=runner)
+    controller.run(state, working_dir=tmp_path)
+
+    assert len(runner.calls) == 1
+    _config_path, options, _cwd, _cb = runner.calls[0]
+    assert isinstance(options, RunOptions)
+    assert options.color_map == "RdBu"
+
+
 def test_validation_errors_map_to_fields_before_run(tmp_path: Path) -> None:
     bad_state = _state()
     bad_state.first_day_of_water_year = "bad-int"
