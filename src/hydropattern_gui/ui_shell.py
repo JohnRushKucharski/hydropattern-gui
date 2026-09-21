@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import tkinter as tk
+from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
@@ -109,6 +110,29 @@ class GuiController:
                 temp_path.unlink()
 
 
+@dataclass
+class TypedCard:
+    """Container wrapping one typed characteristic card's widgets/variables
+    under a single lookup, introduced additively (Phase 1 of the TypedCard
+    refactor -- see HANDOFF.md Task 1) as a step toward collapsing the 5
+    near-duplicated per-kind attribute families in HydropatternGuiApp.
+
+    `mode_var` is None for kinds without a single simple/between mode
+    picker (timing has no mode at all; frequency has independent
+    base/nested pattern modes instead, tracked in `field_vars` under
+    "base_mode"/"nested_mode"). `field_vars` maps each Fields dataclass
+    attribute name (or, for frequency, "base_"/"nested_"-prefixed pattern
+    attribute names) to its backing Tk variable.
+    """
+
+    enabled_var: tk.BooleanVar
+    mode_var: tk.StringVar | None
+    field_vars: dict[str, tk.Variable] = field(default_factory=dict)
+    body: ttk.Frame | None = None
+    up_button: ttk.Button | None = None
+    down_button: ttk.Button | None = None
+
+
 class HydropatternGuiApp:
 
     def __init__(self, root: tk.Tk, controller: GuiController) -> None:
@@ -189,6 +213,21 @@ class HydropatternGuiApp:
         }
         self._characteristic_vars: list[tuple[tk.StringVar, tk.StringVar]] = []
         self._characteristic_widgets: list[tuple[ttk.Combobox, ttk.Entry]] = []
+        # Backing lookups for the generic _update_mode_visibility(kind):
+        # magnitude/duration/rate_of_change all share the identical
+        # simple/between mode-visibility shape (see HANDOFF.md Task 1
+        # Phase 3). Mode vars exist already (set above); the frame-widget
+        # tuples are registered by each _build_X_card method as it builds
+        # its frames, since _update_mode_visibility is called from within
+        # those methods -- before self._cards / other post-build lookups
+        # exist. Timing has no mode; Frequency's mode-visibility is
+        # genuinely shaped differently and stays bespoke.
+        self._mode_vars: dict[str, tk.StringVar] = {
+            "magnitude": self._magnitude_mode_var,
+            "duration": self._duration_mode_var,
+            "rate_of_change": self._roc_mode_var,
+        }
+        self._mode_frames: dict[str, tuple[ttk.Frame, ttk.Frame]] = {}
         self._build_ui()
         # Single source of truth for characteristic row order: a permutation
         # of the 5 typed-card kind names plus one "generic:{i}" id per
@@ -346,8 +385,18 @@ class HydropatternGuiApp:
             "duration": self._duration_enabled_var,
             "frequency": self._freq_enabled_var,
         }
+        # Backing lookup for the generic _update_mode_visibility(kind):
+        # magnitude/duration/rate_of_change all share the identical
+        # simple/between mode-visibility shape (see HANDOFF.md Task 1
+        # Phase 3). Timing has no mode; Frequency's mode-visibility is
+        # genuinely shaped differently (2 independent pattern editors, 3
+        # modes) and stays bespoke in _update_freq_mode_visibility.
+        # (self._mode_frames itself was already populated incrementally by
+        # each _build_X_card call above, since _update_mode_visibility is
+        # invoked from within those methods before this point is reached.)
         for kind in self._typed_cards:
             self._update_reorder_buttons(kind)
+        self._cards: dict[str, TypedCard] = self._build_typed_cards()
         generic_kinds = tuple(
             kind
             for kind in _CHARACTERISTIC_KINDS
@@ -381,6 +430,90 @@ class HydropatternGuiApp:
             metrics_entry.grid(row=row, column=2, sticky=tk.W, padx=4, pady=2)
             self._characteristic_widgets.append((kind_box, metrics_entry))
             metrics_var.trace_add("write", self._on_characteristic_metrics_changed)
+
+    def _build_typed_cards(self) -> dict[str, TypedCard]:
+        """Phase 1 (additive only) of the TypedCard refactor: wrap the
+        already-built per-kind widgets/variables into one TypedCard per
+        kind, without changing any existing attribute or behavior. See
+        HANDOFF.md Task 1 for the full multi-phase plan; _read_X_fields/
+        _write_X_fields still go through the legacy self._X_..._var
+        attributes directly until Phase 2 migrates them to read through
+        self._cards instead."""
+        return {
+            "timing": TypedCard(
+                enabled_var=self._timing_enabled_var,
+                mode_var=None,
+                field_vars={
+                    "first_day_of_year": self._timing_first_day_var,
+                    "last_day_of_year": self._timing_last_day_var,
+                },
+                body=self._timing_body,
+                up_button=self._timing_up_button,
+                down_button=self._timing_down_button,
+            ),
+            "magnitude": TypedCard(
+                enabled_var=self._magnitude_enabled_var,
+                mode_var=self._magnitude_mode_var,
+                field_vars={
+                    "operator": self._magnitude_operator_var,
+                    "threshold": self._magnitude_threshold_var,
+                    "minimum": self._magnitude_min_var,
+                    "maximum": self._magnitude_max_var,
+                    "ma_enabled": self._magnitude_ma_enabled_var,
+                    "ma_periods": self._magnitude_ma_periods_var,
+                },
+                body=self._magnitude_body,
+                up_button=self._magnitude_up_button,
+                down_button=self._magnitude_down_button,
+            ),
+            "duration": TypedCard(
+                enabled_var=self._duration_enabled_var,
+                mode_var=self._duration_mode_var,
+                field_vars={
+                    "operator": self._duration_operator_var,
+                    "steps": self._duration_steps_var,
+                    "min_steps": self._duration_min_var,
+                    "max_steps": self._duration_max_var,
+                },
+                body=self._duration_body,
+                up_button=self._duration_up_button,
+                down_button=self._duration_down_button,
+            ),
+            "rate_of_change": TypedCard(
+                enabled_var=self._roc_enabled_var,
+                mode_var=self._roc_mode_var,
+                field_vars={
+                    "operator": self._roc_operator_var,
+                    "threshold": self._roc_threshold_var,
+                    "minimum": self._roc_min_var,
+                    "maximum": self._roc_max_var,
+                    "ma_enabled": self._roc_ma_enabled_var,
+                    "ma_periods": self._roc_ma_periods_var,
+                    "look_back_enabled": self._roc_look_back_enabled_var,
+                    "look_back": self._roc_look_back_var,
+                    "min_enabled": self._roc_min_enabled_var,
+                    "min_value": self._roc_min_value_var,
+                },
+                body=self._roc_body,
+                up_button=self._roc_up_button,
+                down_button=self._roc_down_button,
+            ),
+            "frequency": TypedCard(
+                enabled_var=self._freq_enabled_var,
+                mode_var=None,
+                field_vars={
+                    "nested_enabled": self._freq_nested_enabled_var,
+                    **{
+                        f"{prefix}_{name}": var
+                        for prefix in ("base", "nested")
+                        for name, var in self._freq_vars[prefix].items()
+                    },
+                },
+                body=self._freq_body,
+                up_button=self._freq_up_button,
+                down_button=self._freq_down_button,
+            ),
+        }
 
     def _build_timing_card(self, parent: ttk.LabelFrame | ttk.Frame, row: int) -> None:
         card = ttk.LabelFrame(parent, text="", padding=6)
@@ -482,6 +615,10 @@ class HydropatternGuiApp:
         ).grid(row=0, column=4, padx=4)
         self._magnitude_max_unit_label = ttk.Label(self._magnitude_between_frame, text="")
         self._magnitude_max_unit_label.grid(row=0, column=5, padx=4)
+        self._mode_frames["magnitude"] = (
+            self._magnitude_simple_frame,
+            self._magnitude_between_frame,
+        )
 
         ma_row = ttk.Frame(self._magnitude_body)
         ma_row.grid(row=2, column=0, sticky=tk.W, pady=2)
@@ -496,7 +633,7 @@ class HydropatternGuiApp:
         ttk.Label(ma_row, text="(timesteps)").pack(side=tk.LEFT, padx=(4, 0))
 
         self._update_magnitude_unit_labels()
-        self._update_magnitude_mode_visibility()
+        self._update_mode_visibility("magnitude")
         if self._magnitude_enabled_var.get():
             self._magnitude_body.grid()
         else:
@@ -561,8 +698,12 @@ class HydropatternGuiApp:
             self._duration_between_frame, textvariable=self._duration_max_var, width=12
         ).grid(row=0, column=4, padx=4)
         ttk.Label(self._duration_between_frame, text="(timesteps)").grid(row=0, column=5, padx=4)
+        self._mode_frames["duration"] = (
+            self._duration_simple_frame,
+            self._duration_between_frame,
+        )
 
-        self._update_duration_mode_visibility()
+        self._update_mode_visibility("duration")
         if self._duration_enabled_var.get():
             self._duration_body.grid()
         else:
@@ -624,6 +765,7 @@ class HydropatternGuiApp:
         ttk.Entry(
             self._roc_between_frame, textvariable=self._roc_max_var, width=12
         ).grid(row=0, column=3, padx=4)
+        self._mode_frames["rate_of_change"] = (self._roc_simple_frame, self._roc_between_frame)
 
         # Cascading optionals: hydropattern requires each earlier optional
         # (ma_periods -> look_back -> min) to be a real value before a later
@@ -665,7 +807,7 @@ class HydropatternGuiApp:
         )
         self._roc_min_value_entry.pack(side=tk.LEFT, padx=(8, 0))
 
-        self._update_roc_mode_visibility()
+        self._update_mode_visibility("rate_of_change")
         self._update_roc_cascade_state()
         if self._roc_enabled_var.get():
             self._roc_body.grid()
@@ -1161,7 +1303,7 @@ class HydropatternGuiApp:
         else:
             self._magnitude_operator_var.set(">")
             self._magnitude_threshold_var.set("")
-        self._update_magnitude_mode_visibility()
+        self._update_mode_visibility("magnitude")
 
     def _on_magnitude_ma_enabled_changed(self, *_: object) -> None:
         state = "normal" if self._magnitude_ma_enabled_var.get() else "disabled"
@@ -1251,13 +1393,23 @@ class HydropatternGuiApp:
             self._update_reorder_buttons(kind)
         self._refresh_card_grid_rows()
 
-    def _update_magnitude_mode_visibility(self) -> None:
-        if self._magnitude_mode_var.get() == "simple":
-            self._magnitude_simple_frame.grid()
-            self._magnitude_between_frame.grid_remove()
+    def _update_mode_visibility(self, kind: str) -> None:
+        """Generic replacement for the near-identical
+        _update_magnitude_mode_visibility / _update_duration_mode_visibility
+        / _update_roc_mode_visibility methods -- all 3 share the identical
+        Simple/Between mode-visibility shape (see HANDOFF.md Task 1 Phase
+        3). Rate of Change's optional-param cascade (_update_roc_cascade_
+        state) and Frequency's nested-pattern-editor visibility
+        (_update_freq_mode_visibility / _update_freq_nested_visibility) are
+        genuinely shaped differently and stay bespoke."""
+        mode_var = self._mode_vars[kind]
+        simple_frame, between_frame = self._mode_frames[kind]
+        if mode_var.get() == "simple":
+            simple_frame.grid()
+            between_frame.grid_remove()
         else:
-            self._magnitude_simple_frame.grid_remove()
-            self._magnitude_between_frame.grid()
+            simple_frame.grid_remove()
+            between_frame.grid()
 
     def _update_magnitude_unit_labels(self) -> None:
         unit_text = f"({self._data_units_var.get().strip() or 'data units'})"
@@ -1266,32 +1418,34 @@ class HydropatternGuiApp:
         self._magnitude_max_unit_label.configure(text=unit_text)
 
     def _read_magnitude_fields(self) -> MagnitudeFields:
-        mode = cast(MagnitudeMode, self._magnitude_mode_var.get())
+        card = self._cards["magnitude"]
+        field_vars = card.field_vars
+        mode = cast(MagnitudeMode, cast(tk.StringVar, card.mode_var).get())
         return MagnitudeFields(
             mode=mode,
-            operator=self._magnitude_operator_var.get() or None,
-            threshold=_parse_optional_float(self._magnitude_threshold_var.get()),
-            minimum=_parse_optional_float(self._magnitude_min_var.get()),
-            maximum=_parse_optional_float(self._magnitude_max_var.get()),
-            ma_enabled=self._magnitude_ma_enabled_var.get(),
-            ma_periods=_parse_optional_int(self._magnitude_ma_periods_var.get()),
+            operator=field_vars["operator"].get() or None,
+            threshold=_parse_optional_float(field_vars["threshold"].get()),
+            minimum=_parse_optional_float(field_vars["minimum"].get()),
+            maximum=_parse_optional_float(field_vars["maximum"].get()),
+            ma_enabled=field_vars["ma_enabled"].get(),
+            ma_periods=_parse_optional_int(field_vars["ma_periods"].get()),
         )
 
     def _write_magnitude_fields(self, enabled: bool, fields: MagnitudeFields) -> None:
-        self._magnitude_enabled_var.set(enabled)
-        self._magnitude_mode_var.set(fields.mode)
-        self._magnitude_operator_var.set(fields.operator or ">")
-        self._magnitude_threshold_var.set(
-            "" if fields.threshold is None else str(fields.threshold)
-        )
-        self._magnitude_min_var.set("" if fields.minimum is None else str(fields.minimum))
-        self._magnitude_max_var.set("" if fields.maximum is None else str(fields.maximum))
-        self._magnitude_ma_enabled_var.set(fields.ma_enabled)
-        self._magnitude_ma_periods_var.set(
+        card = self._cards["magnitude"]
+        field_vars = card.field_vars
+        card.enabled_var.set(enabled)
+        cast(tk.StringVar, card.mode_var).set(fields.mode)
+        field_vars["operator"].set(fields.operator or ">")
+        field_vars["threshold"].set("" if fields.threshold is None else str(fields.threshold))
+        field_vars["minimum"].set("" if fields.minimum is None else str(fields.minimum))
+        field_vars["maximum"].set("" if fields.maximum is None else str(fields.maximum))
+        field_vars["ma_enabled"].set(fields.ma_enabled)
+        field_vars["ma_periods"].set(
             "" if fields.ma_periods is None else str(fields.ma_periods)
         )
         self._update_card_enabled_state("magnitude")
-        self._update_magnitude_mode_visibility()
+        self._update_mode_visibility("magnitude")
 
     def _on_duration_mode_changed(self, *_: object) -> None:
         if self._duration_mode_var.get() == "simple":
@@ -1300,48 +1454,46 @@ class HydropatternGuiApp:
         else:
             self._duration_operator_var.set(">")
             self._duration_steps_var.set("")
-        self._update_duration_mode_visibility()
-
-    def _update_duration_mode_visibility(self) -> None:
-        if self._duration_mode_var.get() == "simple":
-            self._duration_simple_frame.grid()
-            self._duration_between_frame.grid_remove()
-        else:
-            self._duration_simple_frame.grid_remove()
-            self._duration_between_frame.grid()
+        self._update_mode_visibility("duration")
 
     def _read_duration_fields(self) -> DurationFields:
-        mode = cast(DurationMode, self._duration_mode_var.get())
+        card = self._cards["duration"]
+        field_vars = card.field_vars
+        mode = cast(DurationMode, cast(tk.StringVar, card.mode_var).get())
         return DurationFields(
             mode=mode,
-            operator=self._duration_operator_var.get() or None,
-            steps=_parse_optional_int(self._duration_steps_var.get()),
-            min_steps=_parse_optional_int(self._duration_min_var.get()),
-            max_steps=_parse_optional_int(self._duration_max_var.get()),
+            operator=field_vars["operator"].get() or None,
+            steps=_parse_optional_int(field_vars["steps"].get()),
+            min_steps=_parse_optional_int(field_vars["min_steps"].get()),
+            max_steps=_parse_optional_int(field_vars["max_steps"].get()),
         )
 
     def _write_duration_fields(self, enabled: bool, fields: DurationFields) -> None:
-        self._duration_enabled_var.set(enabled)
-        self._duration_mode_var.set(fields.mode)
-        self._duration_operator_var.set(fields.operator or ">")
-        self._duration_steps_var.set("" if fields.steps is None else str(fields.steps))
-        self._duration_min_var.set("" if fields.min_steps is None else str(fields.min_steps))
-        self._duration_max_var.set("" if fields.max_steps is None else str(fields.max_steps))
+        card = self._cards["duration"]
+        field_vars = card.field_vars
+        card.enabled_var.set(enabled)
+        cast(tk.StringVar, card.mode_var).set(fields.mode)
+        field_vars["operator"].set(fields.operator or ">")
+        field_vars["steps"].set("" if fields.steps is None else str(fields.steps))
+        field_vars["min_steps"].set("" if fields.min_steps is None else str(fields.min_steps))
+        field_vars["max_steps"].set("" if fields.max_steps is None else str(fields.max_steps))
         self._update_card_enabled_state("duration")
-        self._update_duration_mode_visibility()
+        self._update_mode_visibility("duration")
 
     def _read_timing_fields(self) -> TimingFields:
+        field_vars = self._cards["timing"].field_vars
         return TimingFields(
-            first_day_of_year=_parse_optional_int(self._timing_first_day_var.get()),
-            last_day_of_year=_parse_optional_int(self._timing_last_day_var.get()),
+            first_day_of_year=_parse_optional_int(field_vars["first_day_of_year"].get()),
+            last_day_of_year=_parse_optional_int(field_vars["last_day_of_year"].get()),
         )
 
     def _write_timing_fields(self, enabled: bool, fields: TimingFields) -> None:
-        self._timing_enabled_var.set(enabled)
-        self._timing_first_day_var.set(
+        card = self._cards["timing"]
+        card.enabled_var.set(enabled)
+        card.field_vars["first_day_of_year"].set(
             "" if fields.first_day_of_year is None else str(fields.first_day_of_year)
         )
-        self._timing_last_day_var.set(
+        card.field_vars["last_day_of_year"].set(
             "" if fields.last_day_of_year is None else str(fields.last_day_of_year)
         )
         self._update_card_enabled_state("timing")
@@ -1353,7 +1505,7 @@ class HydropatternGuiApp:
         else:
             self._roc_operator_var.set(">")
             self._roc_threshold_var.set("")
-        self._update_roc_mode_visibility()
+        self._update_mode_visibility("rate_of_change")
 
     def _on_roc_ma_enabled_changed(self, *_: object) -> None:
         if not self._roc_ma_enabled_var.get():
@@ -1390,49 +1542,45 @@ class HydropatternGuiApp:
         min_active = look_back_active and min_enabled
         self._roc_min_value_entry.configure(state="normal" if min_active else "disabled")
 
-    def _update_roc_mode_visibility(self) -> None:
-        if self._roc_mode_var.get() == "simple":
-            self._roc_simple_frame.grid()
-            self._roc_between_frame.grid_remove()
-        else:
-            self._roc_simple_frame.grid_remove()
-            self._roc_between_frame.grid()
-
     def _read_roc_fields(self) -> RateOfChangeFields:
-        mode = cast(RateOfChangeMode, self._roc_mode_var.get())
+        card = self._cards["rate_of_change"]
+        field_vars = card.field_vars
+        mode = cast(RateOfChangeMode, cast(tk.StringVar, card.mode_var).get())
         return RateOfChangeFields(
             mode=mode,
-            operator=self._roc_operator_var.get() or None,
-            threshold=_parse_optional_float(self._roc_threshold_var.get()),
-            minimum=_parse_optional_float(self._roc_min_var.get()),
-            maximum=_parse_optional_float(self._roc_max_var.get()),
-            ma_enabled=self._roc_ma_enabled_var.get(),
-            ma_periods=_parse_optional_int(self._roc_ma_periods_var.get()),
-            look_back_enabled=self._roc_look_back_enabled_var.get(),
-            look_back=_parse_optional_int(self._roc_look_back_var.get()),
-            min_enabled=self._roc_min_enabled_var.get(),
-            min_value=_parse_optional_float(self._roc_min_value_var.get()),
+            operator=field_vars["operator"].get() or None,
+            threshold=_parse_optional_float(field_vars["threshold"].get()),
+            minimum=_parse_optional_float(field_vars["minimum"].get()),
+            maximum=_parse_optional_float(field_vars["maximum"].get()),
+            ma_enabled=field_vars["ma_enabled"].get(),
+            ma_periods=_parse_optional_int(field_vars["ma_periods"].get()),
+            look_back_enabled=field_vars["look_back_enabled"].get(),
+            look_back=_parse_optional_int(field_vars["look_back"].get()),
+            min_enabled=field_vars["min_enabled"].get(),
+            min_value=_parse_optional_float(field_vars["min_value"].get()),
         )
 
     def _write_roc_fields(self, enabled: bool, fields: RateOfChangeFields) -> None:
-        self._roc_enabled_var.set(enabled)
-        self._roc_mode_var.set(fields.mode)
-        self._roc_operator_var.set(fields.operator or ">")
-        self._roc_threshold_var.set("" if fields.threshold is None else str(fields.threshold))
-        self._roc_min_var.set("" if fields.minimum is None else str(fields.minimum))
-        self._roc_max_var.set("" if fields.maximum is None else str(fields.maximum))
-        self._roc_ma_enabled_var.set(fields.ma_enabled)
-        self._roc_ma_periods_var.set(
+        card = self._cards["rate_of_change"]
+        field_vars = card.field_vars
+        card.enabled_var.set(enabled)
+        cast(tk.StringVar, card.mode_var).set(fields.mode)
+        field_vars["operator"].set(fields.operator or ">")
+        field_vars["threshold"].set("" if fields.threshold is None else str(fields.threshold))
+        field_vars["minimum"].set("" if fields.minimum is None else str(fields.minimum))
+        field_vars["maximum"].set("" if fields.maximum is None else str(fields.maximum))
+        field_vars["ma_enabled"].set(fields.ma_enabled)
+        field_vars["ma_periods"].set(
             "" if fields.ma_periods is None else str(fields.ma_periods)
         )
-        self._roc_look_back_enabled_var.set(fields.look_back_enabled)
-        self._roc_look_back_var.set("" if fields.look_back is None else str(fields.look_back))
-        self._roc_min_enabled_var.set(fields.min_enabled)
-        self._roc_min_value_var.set(
+        field_vars["look_back_enabled"].set(fields.look_back_enabled)
+        field_vars["look_back"].set("" if fields.look_back is None else str(fields.look_back))
+        field_vars["min_enabled"].set(fields.min_enabled)
+        field_vars["min_value"].set(
             "" if fields.min_value is None else str(fields.min_value)
         )
         self._update_card_enabled_state("rate_of_change")
-        self._update_roc_mode_visibility()
+        self._update_mode_visibility("rate_of_change")
         self._update_roc_cascade_state()
 
     def _on_freq_nested_enabled_changed(self, *_: object) -> None:
@@ -1501,47 +1649,52 @@ class HydropatternGuiApp:
             self._freq_frames["nested_wrapper"].grid_remove()
 
     def _read_freq_pattern_fields(self, prefix: str) -> FrequencyPatternFields:
-        pattern_vars = self._freq_vars[prefix]
-        mode = cast(FrequencyPatternMode, pattern_vars["mode"].get())
+        field_vars = self._cards["frequency"].field_vars
+        mode = cast(FrequencyPatternMode, field_vars[f"{prefix}_mode"].get())
         return FrequencyPatternFields(
             mode=mode,
-            operator=pattern_vars["operator"].get() or None,
-            count_n=_parse_optional_int(pattern_vars["count_n"].get()),
-            probability=_parse_optional_float(pattern_vars["probability"].get()),
-            between_min=_parse_optional_int(pattern_vars["between_min"].get()),
-            between_max=_parse_optional_int(pattern_vars["between_max"].get()),
-            out_of_n=_parse_optional_int(pattern_vars["out_of_n"].get()),
-            count_by_event=bool(pattern_vars["count_by_event"].get()),
+            operator=field_vars[f"{prefix}_operator"].get() or None,
+            count_n=_parse_optional_int(field_vars[f"{prefix}_count_n"].get()),
+            probability=_parse_optional_float(field_vars[f"{prefix}_probability"].get()),
+            between_min=_parse_optional_int(field_vars[f"{prefix}_between_min"].get()),
+            between_max=_parse_optional_int(field_vars[f"{prefix}_between_max"].get()),
+            out_of_n=_parse_optional_int(field_vars[f"{prefix}_out_of_n"].get()),
+            count_by_event=bool(field_vars[f"{prefix}_count_by_event"].get()),
         )
 
     def _write_freq_pattern_fields(self, prefix: str, fields: FrequencyPatternFields) -> None:
-        pattern_vars = self._freq_vars[prefix]
-        pattern_vars["mode"].set(fields.mode)
-        pattern_vars["operator"].set(fields.operator or ">")
-        pattern_vars["count_n"].set("" if fields.count_n is None else str(fields.count_n))
-        pattern_vars["probability"].set(
+        field_vars = self._cards["frequency"].field_vars
+        field_vars[f"{prefix}_mode"].set(fields.mode)
+        field_vars[f"{prefix}_operator"].set(fields.operator or ">")
+        field_vars[f"{prefix}_count_n"].set(
+            "" if fields.count_n is None else str(fields.count_n)
+        )
+        field_vars[f"{prefix}_probability"].set(
             "" if fields.probability is None else str(fields.probability)
         )
-        pattern_vars["between_min"].set(
+        field_vars[f"{prefix}_between_min"].set(
             "" if fields.between_min is None else str(fields.between_min)
         )
-        pattern_vars["between_max"].set(
+        field_vars[f"{prefix}_between_max"].set(
             "" if fields.between_max is None else str(fields.between_max)
         )
-        pattern_vars["out_of_n"].set("" if fields.out_of_n is None else str(fields.out_of_n))
-        pattern_vars["count_by_event"].set(fields.count_by_event)
+        field_vars[f"{prefix}_out_of_n"].set(
+            "" if fields.out_of_n is None else str(fields.out_of_n)
+        )
+        field_vars[f"{prefix}_count_by_event"].set(fields.count_by_event)
         self._update_freq_mode_visibility(prefix)
 
     def _read_frequency_fields(self) -> FrequencyFields:
         return FrequencyFields(
-            nested_enabled=self._freq_nested_enabled_var.get(),
+            nested_enabled=self._cards["frequency"].field_vars["nested_enabled"].get(),
             base=self._read_freq_pattern_fields("base"),
             nested=self._read_freq_pattern_fields("nested"),
         )
 
     def _write_frequency_fields(self, enabled: bool, fields: FrequencyFields) -> None:
-        self._freq_enabled_var.set(enabled)
-        self._freq_nested_enabled_var.set(fields.nested_enabled)
+        card = self._cards["frequency"]
+        card.enabled_var.set(enabled)
+        card.field_vars["nested_enabled"].set(fields.nested_enabled)
         self._write_freq_pattern_fields("base", fields.base)
         self._write_freq_pattern_fields("nested", fields.nested)
         self._update_card_enabled_state("frequency")

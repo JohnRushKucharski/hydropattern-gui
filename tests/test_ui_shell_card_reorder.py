@@ -14,17 +14,6 @@ from hydropattern_gui.runner_service import InProcessHydropatternRunner
 from hydropattern_gui.ui_shell import GuiController, HydropatternGuiApp
 
 
-@pytest.fixture(scope="module")
-def root() -> tk.Tk:
-    try:
-        tk_root = tk.Tk()
-    except tk.TclError as exc:  # pragma: no cover - no display/broken Tk install
-        pytest.skip(f"Tk display unavailable: {exc}")
-    tk_root.withdraw()
-    yield tk_root
-    tk_root.destroy()
-
-
 @pytest.fixture
 def app(root: tk.Tk) -> HydropatternGuiApp:
     # Reuse a single module-scoped Tk() root across tests (repeatedly creating
