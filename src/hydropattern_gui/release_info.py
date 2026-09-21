@@ -4,7 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 PINNED_RUNTIME_SET: dict[str, str] = {
     "hydropattern-gui": "0.1.0",
-    "hydropattern": "0.0.0",
+    "hydropattern": "0.2.0",
     "climate-canvas": "0.1.0",
 }
 
