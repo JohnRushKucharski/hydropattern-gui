@@ -489,6 +489,13 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             "duration": (self._duration_up_button, self._duration_down_button),
             "frequency": (self._freq_up_button, self._freq_down_button),
         }
+        self._order_labels: dict[str, ttk.Label] = {
+            "timing": self._timing_order_label,
+            "magnitude": self._magnitude_order_label,
+            "rate_of_change": self._roc_order_label,
+            "duration": self._duration_order_label,
+            "frequency": self._freq_order_label,
+        }
         self._enabled_vars: dict[str, tk.BooleanVar] = {
             "timing": self._timing_enabled_var,
             "magnitude": self._magnitude_enabled_var,
@@ -1006,11 +1013,16 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
     def _update_reorder_buttons(self, kind: str) -> None:
         """Generic replacement for the 5 near-identical _update_X_reorder_buttons
         methods: pack/hide a typed card's up/down buttons and enable/disable
-        them based on its position among currently-active rows."""
+        them based on its position among currently-active rows. Also updates
+        the card's order badge label to show its 1-based position among
+        active rows (HANDOFF.md Task 6 -- magnitude-card-visual-order-
+        indicator; generalized to all 5 typed cards, not just magnitude)."""
         up_button, down_button = self._reorder_buttons[kind]
+        order_label = self._order_labels[kind]
         if not self._enabled_vars[kind].get():
             up_button.pack_forget()
             down_button.pack_forget()
+            order_label.configure(text="")
             return
         up_button.pack(side=tk.LEFT, padx=(8, 0))
         down_button.pack(side=tk.LEFT, padx=(2, 0))
@@ -1018,6 +1030,7 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         position = active.index(kind)
         up_button.configure(state="disabled" if position <= 0 else "normal")
         down_button.configure(state="disabled" if position >= len(active) - 1 else "normal")
+        order_label.configure(text=f"#{position + 1}")
 
     def _update_card_enabled_state(self, kind: str) -> None:
         """Generic replacement for the 5 near-identical

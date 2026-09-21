@@ -224,6 +224,8 @@ class CharacteristicsUiMixin:
             header_row, text="\u25bc", width=2, command=lambda: self._move_row("timing", 1)
         )
         self._timing_down_button.pack(side=tk.LEFT, padx=(2, 0))
+        self._timing_order_label = ttk.Label(header_row, text="")
+        self._timing_order_label.pack(side=tk.LEFT, padx=(8, 0))
 
         self._timing_body = ttk.Frame(card, padding=(20, 4, 0, 0))
         self._timing_body.grid(row=1, column=0, sticky=tk.W)
@@ -262,6 +264,8 @@ class CharacteristicsUiMixin:
             header_row, text="\u25bc", width=2, command=lambda: self._move_row("magnitude", 1)
         )
         self._magnitude_down_button.pack(side=tk.LEFT, padx=(2, 0))
+        self._magnitude_order_label = ttk.Label(header_row, text="")
+        self._magnitude_order_label.pack(side=tk.LEFT, padx=(8, 0))
 
         self._magnitude_body = ttk.Frame(card, padding=(20, 4, 0, 0))
         self._magnitude_body.grid(row=1, column=0, sticky=tk.W)
@@ -348,6 +352,8 @@ class CharacteristicsUiMixin:
             header_row, text="\u25bc", width=2, command=lambda: self._move_row("duration", 1)
         )
         self._duration_down_button.pack(side=tk.LEFT, padx=(2, 0))
+        self._duration_order_label = ttk.Label(header_row, text="")
+        self._duration_order_label.pack(side=tk.LEFT, padx=(8, 0))
 
         self._duration_body = ttk.Frame(card, padding=(20, 4, 0, 0))
         self._duration_body.grid(row=1, column=0, sticky=tk.W)
@@ -424,6 +430,8 @@ class CharacteristicsUiMixin:
             command=lambda: self._move_row("rate_of_change", 1),
         )
         self._roc_down_button.pack(side=tk.LEFT, padx=(2, 0))
+        self._roc_order_label = ttk.Label(header_row, text="")
+        self._roc_order_label.pack(side=tk.LEFT, padx=(8, 0))
 
         self._roc_body = ttk.Frame(card, padding=(20, 4, 0, 0))
         self._roc_body.grid(row=1, column=0, sticky=tk.W)
@@ -529,6 +537,8 @@ class CharacteristicsUiMixin:
             header_row, text="\u25bc", width=2, command=lambda: self._move_row("frequency", 1)
         )
         self._freq_down_button.pack(side=tk.LEFT, padx=(2, 0))
+        self._freq_order_label = ttk.Label(header_row, text="")
+        self._freq_order_label.pack(side=tk.LEFT, padx=(8, 0))
 
         self._freq_body = ttk.Frame(card, padding=(20, 4, 0, 0))
         self._freq_body.grid(row=1, column=0, sticky=tk.W)
