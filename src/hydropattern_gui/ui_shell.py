@@ -7,7 +7,7 @@ import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Protocol, cast
+from typing import Callable, Literal, Protocol, cast
 
 from hydropattern_gui.characteristics_ui import CharacteristicsUiMixin, TypedCard
 from hydropattern_gui.config_model import (
@@ -57,10 +57,32 @@ class RunnerBackend(Protocol):
     ) -> RunResult: ...
 
 
+class RunningRunLike(Protocol):
+    def wait(self) -> RunResult: ...
+    def cancel(self) -> None: ...
+
+
+class CancellableRunnerBackend(Protocol):
+    def start(
+        self,
+        config_path: str | Path,
+        options: RunOptions | None = None,
+        on_output: LogCallback | None = None,
+        cwd: str | Path | None = None,
+    ) -> RunningRunLike: ...
+
+
 class GuiController:
 
     def __init__(self, runner: RunnerBackend) -> None:
         self._runner = runner
+
+    def supports_cancel(self) -> bool:
+        """True if the underlying runner exposes a process handle that can
+        be cancelled mid-run (subprocess-based HydropatternRunner). The
+        default InProcessHydropatternRunner runs hydropattern in-thread and
+        cannot be interrupted safely, so this returns False for it."""
+        return hasattr(self._runner, "start")
 
     def load_form_state(self, path: str | Path) -> GuiFormState:
         config = read_config_toml(path)
@@ -98,6 +120,35 @@ class GuiController:
         finally:
             if temp_path.exists():
                 temp_path.unlink()
+
+    def start_run(
+        self,
+        state: GuiFormState,
+        on_log: LogCallback | None = None,
+        working_dir: str | Path | None = None,
+    ) -> tuple[RunningRunLike, Path]:
+        """Cancel-capable counterpart to run(): starts the run and returns
+        immediately with a (handle, temp_path) pair. Caller is responsible
+        for calling handle.wait() and then unlinking temp_path. Only valid
+        when supports_cancel() is True."""
+        if not hasattr(self._runner, "start"):
+            raise RuntimeError("Underlying runner does not support cancellable start().")
+        config = config_from_form_state(state)
+        run_cwd = Path(working_dir).resolve() if working_dir is not None else Path.cwd()
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False, dir=run_cwd, encoding="utf-8"
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+        write_config_toml(temp_path, config, mode="minimal")
+        run_options = run_options_from_config(config)
+        cancellable_runner = cast(CancellableRunnerBackend, self._runner)
+        running = cancellable_runner.start(
+            temp_path.name,
+            options=run_options,
+            on_output=on_log,
+            cwd=run_cwd,
+        )
+        return running, temp_path
 
 
 class HydropatternGuiApp(CharacteristicsUiMixin):
@@ -195,6 +246,7 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             "rate_of_change": self._roc_mode_var,
         }
         self._mode_frames: dict[str, tuple[ttk.Frame, ttk.Frame]] = {}
+        self._active_run: RunningRunLike | None = None
         self._build_ui()
         # Single source of truth for characteristic row order: a permutation
         # of the 5 typed-card kind names plus one "generic:{i}" id per
@@ -579,6 +631,18 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             run_row, text="Run", command=self._on_run, style="Primary.TButton"
         )
         self._run_button.pack(side=tk.LEFT, padx=4)
+        self._cancel_button = ttk.Button(
+            run_row, text="Cancel", command=self._on_cancel, state=tk.DISABLED
+        )
+        if self._controller.supports_cancel():
+            self._cancel_button.pack(side=tk.LEFT, padx=4)
+        self._open_output_dir_button = ttk.Button(
+            run_row,
+            text="Open output folder",
+            command=self._on_open_output_dir,
+            state=tk.DISABLED,
+        )
+        self._open_output_dir_button.pack(side=tk.LEFT, padx=4)
 
     def _build_run_status_section(self, container: ttk.Frame) -> None:
         status_row = ttk.Frame(container)
@@ -587,6 +651,8 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         ttk.Label(status_row, textvariable=self._status_var).pack(side=tk.RIGHT, padx=4)
 
         self._log_text = tk.Text(container, height=8, wrap=tk.NONE)
+        self._log_text.tag_configure("stderr", foreground="red")
+        self._log_text.tag_configure("stdout", foreground="black")
         self._log_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
     def _typed_card_specs(self) -> dict[str, tuple[tk.BooleanVar, Callable[[], str]]]:
@@ -742,8 +808,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         self._preview_text.delete("1.0", tk.END)
         self._preview_text.insert("1.0", text)
 
-    def _append_log(self, text: str) -> None:
-        self._log_text.insert(tk.END, text)
+    def _append_log(self, text: str, channel: LogChannel | Literal["system"] = "system") -> None:
+        tag = channel if channel in ("stdout", "stderr") else ()
+        self._log_text.insert(tk.END, text, tag)
         self._log_text.see(tk.END)
 
     def _set_log_placeholder(self) -> None:
@@ -829,6 +896,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         state = self._collect_state()
         self._apply_field_errors({})
         self._run_button.config(state=tk.DISABLED)
+        self._open_output_dir_button.config(state=tk.DISABLED)
+        if self._controller.supports_cancel():
+            self._cancel_button.config(state=tk.NORMAL)
         self._status_var.set("Running...")
         self._set_log_placeholder()
         self._append_log("Run started. Waiting for hydropattern output...\n")
@@ -836,6 +906,17 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         worker = threading.Thread(target=self._run_worker, args=(state,), daemon=True)
         worker.start()
         self._root.after(100, self._drain_events)
+
+    def _on_cancel(self) -> None:
+        if self._active_run is not None:
+            self._active_run.cancel()
+            self._status_var.set("Cancelling...")
+            self._cancel_button.config(state=tk.DISABLED)
+
+    def _on_open_output_dir(self) -> None:
+        output_dir = self._output_dir_var.get().strip()
+        if output_dir:
+            os.startfile(output_dir)  # noqa: S606
 
     def _on_about(self) -> None:
         messagebox.showinfo("About hydropattern-gui", build_about_text())
@@ -961,8 +1042,24 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
 
     def _run_worker(self, state: GuiFormState) -> None:
         def on_log(channel: LogChannel, line: str) -> None:
-            self._event_queue.put(("log", f"[{channel}] {line}"))
+            self._event_queue.put(("log", (channel, line)))
 
+        if self._controller.supports_cancel():
+            temp_path: Path | None = None
+            try:
+                running, temp_path = self._controller.start_run(state, on_log=on_log)
+                self._active_run = running
+                result = running.wait()
+                self._event_queue.put(("done", result))
+            except FormValidationError as exc:
+                self._event_queue.put(("error", (f"Validation error: {exc}", exc.field_errors)))
+            except Exception as exc:  # noqa: BLE001
+                self._event_queue.put(("error", (str(exc), {})))
+            finally:
+                self._active_run = None
+                if temp_path is not None and temp_path.exists():
+                    temp_path.unlink()
+            return
         try:
             result = self._controller.run(state, on_log=on_log)
             self._event_queue.put(("done", result))
@@ -979,12 +1076,19 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             except Empty:
                 break
             if event_type == "log":
-                self._append_log(str(payload))
+                channel, line = cast("tuple[LogChannel, str]", payload)
+                self._append_log(line, channel)
             elif event_type == "done":
                 result = payload
                 assert isinstance(result, RunResult)
-                self._status_var.set(f"Run done (exit={result.exit_code})")
+                if result.cancelled:
+                    self._status_var.set("Run cancelled")
+                else:
+                    self._status_var.set(f"Run done (exit={result.exit_code})")
+                    if result.exit_code == 0:
+                        self._open_output_dir_button.config(state=tk.NORMAL)
                 self._run_button.config(state=tk.NORMAL)
+                self._cancel_button.config(state=tk.DISABLED)
                 self._hide_run_progress()
                 saw_terminal_event = True
             elif event_type == "error":
@@ -992,6 +1096,7 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
                 self._apply_field_errors(field_errors)
                 self._status_var.set(f"Run error: {message}")
                 self._run_button.config(state=tk.NORMAL)
+                self._cancel_button.config(state=tk.DISABLED)
                 self._hide_run_progress()
                 saw_terminal_event = True
         if not saw_terminal_event:
