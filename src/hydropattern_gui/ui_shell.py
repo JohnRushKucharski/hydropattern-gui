@@ -248,30 +248,62 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
     def _build_ui(self) -> None:
         self._root.title("hydropattern-gui")
         self._root.geometry("1100x850")
-        container = self._build_scrollable_container()
-        self._build_timeseries_section(container)
-        self._build_component_section(container)
-        self._build_output_section(container)
-        self._build_climate_section(container)
-        self._build_preview_section(container)
-        self._build_save_section(container)
-        self._build_run_section(container)
+        self._configure_styles()
+        self._root.grid_columnconfigure(0, weight=0)
+        self._root.grid_columnconfigure(1, weight=1)
+        self._root.grid_rowconfigure(0, weight=1)
+
+        self._sidebar_outer, self._sidebar_container = self._build_scrollable_frame(
+            self._root, width=380
+        )
+        self._sidebar_outer.grid(row=0, column=0, sticky=tk.NS)
+        self._sidebar_outer.grid_propagate(False)
+
+        self._stage_container = ttk.Frame(self._root, padding=10)
+        self._stage_container.grid(row=0, column=1, sticky=tk.NSEW)
+
+        self._build_timeseries_section(self._sidebar_container)
+        self._build_component_section(self._sidebar_container)
+        self._build_output_section(self._sidebar_container)
+        self._build_climate_section(self._sidebar_container)
+        self._build_save_section(self._sidebar_container)
+        self._build_run_button_section(self._sidebar_container)
+
+        self._build_preview_section(self._stage_container)
+        self._build_run_status_section(self._stage_container)
+
         self._set_log_placeholder()
         self._update_characteristic_row_states()
 
-    def _build_scrollable_container(self) -> ttk.Frame:
-        outer = ttk.Frame(self._root, padding=10)
-        outer.pack(fill=tk.BOTH, expand=True)
-        canvas = tk.Canvas(outer, highlightthickness=0)
+    def _configure_styles(self) -> None:
+        """Applies the `clam` ttk theme (consistent cross-platform look, per
+        HANDOFF.md Task 2) and defines two custom styles used by the shell
+        layout: `Card.TLabelframe` for section frames and `Primary.TButton`
+        for the main Run action."""
+        style = ttk.Style(self._root)
+        style.theme_use("clam")
+        style.configure("Card.TLabelframe", padding=8)
+        style.configure("Card.TLabelframe.Label", font=("TkDefaultFont", 9, "bold"))
+        style.configure("Primary.TButton", font=("TkDefaultFont", 10, "bold"))
+        self._style = style
+
+    def _build_scrollable_frame(self, parent: tk.Misc, width: int) -> tuple[ttk.Frame, ttk.Frame]:
+        """Builds a canvas+scrollbar wrapped frame. Returns (outer, content):
+        `outer` is the frame callers should grid/pack into their layout;
+        `content` is where callers should pack/grid their own child widgets.
+        Used for the sidebar's own independent scroll region (HANDOFF.md
+        Task 2 -- "col0 sidebar (fixed width, own scroll canvas)")."""
+        outer = ttk.Frame(parent, padding=10)
+        canvas = tk.Canvas(outer, highlightthickness=0, width=width)
         scrollbar = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        container = ttk.Frame(canvas)
-        window_id = canvas.create_window((0, 0), window=container, anchor="nw")
+        content = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
 
-        def _on_container_configure(_: tk.Event[tk.Misc]) -> None:
+        def _on_content_configure(_: tk.Event[tk.Misc]) -> None:
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         def _on_canvas_configure(event: tk.Event[tk.Misc]) -> None:
@@ -284,13 +316,15 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
                 canvas.yview_scroll(units, "units")
             return "break"
 
-        container.bind("<Configure>", _on_container_configure)
+        content.bind("<Configure>", _on_content_configure)
         canvas.bind("<Configure>", _on_canvas_configure)
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        return container
+        return outer, content
 
     def _build_timeseries_section(self, container: ttk.Frame) -> None:
-        ts_frame = ttk.LabelFrame(container, text="Timeseries", padding=8)
+        ts_frame = ttk.LabelFrame(
+            container, text="Timeseries", padding=8, style="Card.TLabelframe"
+        )
         ts_frame.pack(fill=tk.X)
         _row_labeled_entry(ts_frame, 0, "Path", self._path_var, width=80)
         ttk.Button(ts_frame, text="Browse...", command=self._on_browse_timeseries).grid(
@@ -304,7 +338,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         )
 
     def _build_component_section(self, container: ttk.Frame) -> None:
-        component_frame = ttk.LabelFrame(container, text="Component editor", padding=8)
+        component_frame = ttk.LabelFrame(
+            container, text="Component editor", padding=8, style="Card.TLabelframe"
+        )
         component_frame.pack(fill=tk.X, pady=(8, 0))
         _row_labeled_entry(component_frame, 0, "Component", self._component_name_var, width=30)
         ttk.Checkbutton(
@@ -399,7 +435,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             metrics_var.trace_add("write", self._on_characteristic_metrics_changed)
 
     def _build_output_section(self, container: ttk.Frame) -> None:
-        output_frame = ttk.LabelFrame(container, text="Output / Metric", padding=8)
+        output_frame = ttk.LabelFrame(
+            container, text="Output / Metric", padding=8, style="Card.TLabelframe"
+        )
         output_frame.pack(fill=tk.X, pady=(8, 0))
         _row_labeled_entry(output_frame, 0, "Output dir", self._output_dir_var, width=80)
         ttk.Button(output_frame, text="Browse...", command=self._on_browse_output_dir).grid(
@@ -423,7 +461,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         ).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
 
     def _build_climate_section(self, container: ttk.Frame) -> None:
-        climate_frame = ttk.LabelFrame(container, text="Output climate-canvas", padding=8)
+        climate_frame = ttk.LabelFrame(
+            container, text="Output climate-canvas", padding=8, style="Card.TLabelframe"
+        )
         climate_frame.pack(fill=tk.X, pady=(8, 0))
         ttk.Checkbutton(climate_frame, text="Plot enabled", variable=self._plot_enabled_var).grid(
             row=0, column=0, sticky=tk.W, padx=4, pady=4
@@ -474,13 +514,19 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             row=0, column=2, sticky=tk.W, padx=4, pady=4
         )
 
-    def _build_run_section(self, container: ttk.Frame) -> None:
+    def _build_run_button_section(self, container: ttk.Frame) -> None:
         run_row = ttk.Frame(container)
         run_row.pack(fill=tk.X, pady=(8, 0))
-        self._run_button = ttk.Button(run_row, text="Run", command=self._on_run)
+        self._run_button = ttk.Button(
+            run_row, text="Run", command=self._on_run, style="Primary.TButton"
+        )
         self._run_button.pack(side=tk.LEFT, padx=4)
-        self._run_progress = ttk.Progressbar(run_row, mode="indeterminate", length=220)
-        ttk.Label(run_row, textvariable=self._status_var).pack(side=tk.RIGHT, padx=4)
+
+    def _build_run_status_section(self, container: ttk.Frame) -> None:
+        status_row = ttk.Frame(container)
+        status_row.pack(fill=tk.X, pady=(8, 0))
+        self._run_progress = ttk.Progressbar(status_row, mode="indeterminate", length=220)
+        ttk.Label(status_row, textvariable=self._status_var).pack(side=tk.RIGHT, padx=4)
 
         self._log_text = tk.Text(container, height=8, wrap=tk.NONE)
         self._log_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
