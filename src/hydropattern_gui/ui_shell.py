@@ -574,33 +574,57 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             container, text="Output climate-canvas", padding=8, style="Card.TLabelframe"
         )
         climate_frame.pack(fill=tk.X, pady=(8, 0))
-        ttk.Checkbutton(climate_frame, text="Plot enabled", variable=self._plot_enabled_var).grid(
+        header = ttk.Frame(climate_frame)
+        header.grid(row=0, column=0, columnspan=3, sticky=tk.W)
+        self._climate_panel_expanded = True
+        self._climate_toggle_button = ttk.Button(
+            header, text="\u25be Advanced", width=14, command=self._on_toggle_climate_panel
+        )
+        self._climate_toggle_button.pack(side=tk.LEFT)
+
+        self._climate_body = ttk.Frame(climate_frame)
+        self._climate_body.grid(row=1, column=0, columnspan=3, sticky=tk.EW)
+        body = self._climate_body
+        ttk.Checkbutton(body, text="Plot enabled", variable=self._plot_enabled_var).grid(
             row=0, column=0, sticky=tk.W, padx=4, pady=4
         )
         ttk.Checkbutton(
-            climate_frame, text="Interpolate", variable=self._climate_interpolate_var
+            body, text="Interpolate", variable=self._climate_interpolate_var
         ).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Checkbutton(climate_frame, text="Show", variable=self._climate_show_var).grid(
+        ttk.Checkbutton(body, text="Show", variable=self._climate_show_var).grid(
             row=0, column=2, sticky=tk.W, padx=4, pady=4
         )
-        _row_labeled_entry(climate_frame, 1, "Title (optional)", self._climate_title_var, width=45)
-        _row_labeled_entry(climate_frame, 2, "X label", self._climate_xlabel_var, width=45)
-        _row_labeled_entry(climate_frame, 3, "Y label", self._climate_ylabel_var, width=45)
+        _row_labeled_entry(body, 1, "Title (optional)", self._climate_title_var, width=45)
+        _row_labeled_entry(body, 2, "X label", self._climate_xlabel_var, width=45)
+        _row_labeled_entry(body, 3, "Y label", self._climate_ylabel_var, width=45)
         _row_labeled_entry(
-            climate_frame, 4, "Z label (optional)", self._climate_zlabel_var, width=45
+            body, 4, "Z label (optional)", self._climate_zlabel_var, width=45
         )
         self._climate_threshold_entry = _row_labeled_entry(
-            climate_frame, 5, "Threshold (optional)", self._climate_threshold_var, width=12
+            body, 5, "Threshold (optional)", self._climate_threshold_var, width=12
         )
         self._climate_threshold_entry.bind("<FocusOut>", self._on_climate_threshold_focusout)
-        _row_labeled_entry(climate_frame, 6, "Color map", self._climate_color_map_var, width=20)
+        _row_labeled_entry(body, 6, "Color map", self._climate_color_map_var, width=20)
         self._climate_color_map_ticks_entry = _row_labeled_entry(
-            climate_frame,
+            body,
             7,
             "Color map ticks (comma-separated, optional)",
             self._climate_color_map_ticks_var,
             width=45,
         )
+
+    def _on_toggle_climate_panel(self) -> None:
+        """Toggles the climate-canvas advanced panel body via grid()/
+        grid_remove() (idempotent show/hide -- HANDOFF.md Task 5), flipping
+        the header button's disclosure glyph (\u25be expanded / \u25b8
+        collapsed) each call."""
+        self._climate_panel_expanded = not self._climate_panel_expanded
+        if self._climate_panel_expanded:
+            self._climate_body.grid()
+            self._climate_toggle_button.configure(text="\u25be Advanced")
+        else:
+            self._climate_body.grid_remove()
+            self._climate_toggle_button.configure(text="\u25b8 Advanced")
 
     def _build_preview_section(self, container: ttk.Frame) -> None:
         button_row_top = ttk.Frame(container)
