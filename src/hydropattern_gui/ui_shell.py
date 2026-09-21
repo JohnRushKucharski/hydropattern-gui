@@ -285,7 +285,58 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         style.configure("Card.TLabelframe", padding=8)
         style.configure("Card.TLabelframe.Label", font=("TkDefaultFont", 9, "bold"))
         style.configure("Primary.TButton", font=("TkDefaultFont", 10, "bold"))
+        style.configure("Invalid.TEntry", fieldbackground="#ffdddd", bordercolor="#cc0000")
+        style.map("Invalid.TEntry", fieldbackground=[("focus", "#ffdddd")])
+        style.configure("Invalid.TCombobox", fieldbackground="#ffdddd", bordercolor="#cc0000")
+        style.map(
+            "Invalid.TCombobox",
+            fieldbackground=[("focus", "#ffdddd"), ("readonly", "#ffdddd")],
+        )
         self._style = style
+
+    def _field_error_widgets(self) -> dict[str, ttk.Entry | ttk.Combobox]:
+        """Static map of `FormValidationError.field_errors` keys (see
+        gui_form.config_from_form_state) to the single shell widget each
+        key corresponds to. Dynamic per-row keys (components.{name}.rows[i].*)
+        and the no-single-widget `components.rows` key are intentionally
+        excluded -- those stay messagebox-only (HANDOFF.md Task 3)."""
+        return {
+            "timeseries.path": self._path_entry,
+            "timeseries.first_day_of_water_year": self._first_day_entry,
+            "components.name": self._component_name_entry,
+            "output.metric.mode": self._metric_mode_combobox,
+            "output.plot.climate-canvas.threshold": self._climate_threshold_entry,
+            "output.plot.climate-canvas.color_map_ticks": self._climate_color_map_ticks_entry,
+        }
+
+    def _set_widget_invalid(self, widget: ttk.Entry | ttk.Combobox, invalid: bool) -> None:
+        if isinstance(widget, ttk.Combobox):
+            widget.configure(style="Invalid.TCombobox" if invalid else "TCombobox")
+        else:
+            widget.configure(style="Invalid.TEntry" if invalid else "TEntry")
+
+    def _apply_field_errors(self, field_errors: dict[str, str]) -> None:
+        """Highlights every mapped widget whose key is present in
+        `field_errors`; clears highlighting on everything else. Called with
+        `{}` on successful validation to clear all prior highlights."""
+        for key, widget in self._field_error_widgets().items():
+            self._set_widget_invalid(widget, key in field_errors)
+
+    def _on_first_day_focusout(self, _event: tk.Event) -> None:
+        text = self._first_day_var.get().strip()
+        valid = bool(text) and text.lstrip("+").isdigit()
+        self._set_widget_invalid(self._first_day_entry, not valid)
+
+    def _on_climate_threshold_focusout(self, _event: tk.Event) -> None:
+        text = self._climate_threshold_var.get().strip()
+        if not text:
+            self._set_widget_invalid(self._climate_threshold_entry, False)
+            return
+        try:
+            float(text)
+            self._set_widget_invalid(self._climate_threshold_entry, False)
+        except ValueError:
+            self._set_widget_invalid(self._climate_threshold_entry, True)
 
     def _build_scrollable_frame(self, parent: tk.Misc, width: int) -> tuple[ttk.Frame, ttk.Frame]:
         """Builds a canvas+scrollbar wrapped frame. Returns (outer, content):
@@ -326,12 +377,15 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             container, text="Timeseries", padding=8, style="Card.TLabelframe"
         )
         ts_frame.pack(fill=tk.X)
-        _row_labeled_entry(ts_frame, 0, "Path", self._path_var, width=80)
+        self._path_entry = _row_labeled_entry(ts_frame, 0, "Path", self._path_var, width=80)
         ttk.Button(ts_frame, text="Browse...", command=self._on_browse_timeseries).grid(
             row=0, column=2, sticky=tk.W, padx=4, pady=4
         )
         _row_labeled_entry(ts_frame, 1, "Date format (optional)", self._date_format_var, width=20)
-        _row_labeled_entry(ts_frame, 2, "First day of WY", self._first_day_var, width=8)
+        self._first_day_entry = _row_labeled_entry(
+            ts_frame, 2, "First day of WY", self._first_day_var, width=8, unit="(1-366)"
+        )
+        self._first_day_entry.bind("<FocusOut>", self._on_first_day_focusout)
         _row_labeled_entry(ts_frame, 3, "Sheet", self._sheet_name_var, width=12)
         _row_labeled_entry(
             ts_frame, 4, "Data units (optional, e.g. cfs)", self._data_units_var, width=20
@@ -342,7 +396,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             container, text="Component editor", padding=8, style="Card.TLabelframe"
         )
         component_frame.pack(fill=tk.X, pady=(8, 0))
-        _row_labeled_entry(component_frame, 0, "Component", self._component_name_var, width=30)
+        self._component_name_entry = _row_labeled_entry(
+            component_frame, 0, "Component", self._component_name_var, width=30
+        )
         ttk.Checkbutton(
             component_frame, text="Verbose", variable=self._component_verbose_var
         ).grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
@@ -452,13 +508,14 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         ttk.Label(output_frame, text="Metric mode").grid(
             row=2, column=0, sticky=tk.W, padx=4, pady=4
         )
-        ttk.Combobox(
+        self._metric_mode_combobox = ttk.Combobox(
             output_frame,
             textvariable=self._metric_var,
             values=("portion", "percentage", "return_period"),
             state="readonly",
             width=20,
-        ).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
+        )
+        self._metric_mode_combobox.grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
 
     def _build_climate_section(self, container: ttk.Frame) -> None:
         climate_frame = ttk.LabelFrame(
@@ -480,11 +537,12 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         _row_labeled_entry(
             climate_frame, 4, "Z label (optional)", self._climate_zlabel_var, width=45
         )
-        _row_labeled_entry(
+        self._climate_threshold_entry = _row_labeled_entry(
             climate_frame, 5, "Threshold (optional)", self._climate_threshold_var, width=12
         )
+        self._climate_threshold_entry.bind("<FocusOut>", self._on_climate_threshold_focusout)
         _row_labeled_entry(climate_frame, 6, "Color map", self._climate_color_map_var, width=20)
-        _row_labeled_entry(
+        self._climate_color_map_ticks_entry = _row_labeled_entry(
             climate_frame,
             7,
             "Color map ticks (comma-separated, optional)",
@@ -747,9 +805,11 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         try:
             self._controller.save(path, state, mode="minimal")
         except FormValidationError as exc:
+            self._apply_field_errors(exc.field_errors)
             self._status_var.set(f"Validation error: {exc}")
             messagebox.showerror("Cannot save TOML", f"Validation error:\n{exc}")
             return
+        self._apply_field_errors({})
         self._status_var.set(f"Saved: {path}")
 
     def _on_preview(self) -> None:
@@ -757,14 +817,17 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
         try:
             preview = self._controller.preview_toml(state, mode="minimal")
         except FormValidationError as exc:
+            self._apply_field_errors(exc.field_errors)
             self._status_var.set(f"Validation error: {exc}")
             messagebox.showerror("Cannot preview TOML", f"Validation error:\n{exc}")
             return
+        self._apply_field_errors({})
         self._set_preview(preview)
         self._status_var.set("Preview updated")
 
     def _on_run(self) -> None:
         state = self._collect_state()
+        self._apply_field_errors({})
         self._run_button.config(state=tk.DISABLED)
         self._status_var.set("Running...")
         self._set_log_placeholder()
@@ -904,9 +967,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
             result = self._controller.run(state, on_log=on_log)
             self._event_queue.put(("done", result))
         except FormValidationError as exc:
-            self._event_queue.put(("error", f"Validation error: {exc}"))
+            self._event_queue.put(("error", (f"Validation error: {exc}", exc.field_errors)))
         except Exception as exc:  # noqa: BLE001
-            self._event_queue.put(("error", str(exc)))
+            self._event_queue.put(("error", (str(exc), {})))
 
     def _drain_events(self) -> None:
         saw_terminal_event = False
@@ -925,7 +988,9 @@ class HydropatternGuiApp(CharacteristicsUiMixin):
                 self._hide_run_progress()
                 saw_terminal_event = True
             elif event_type == "error":
-                self._status_var.set(f"Run error: {payload}")
+                message, field_errors = cast("tuple[str, dict[str, str]]", payload)
+                self._apply_field_errors(field_errors)
+                self._status_var.set(f"Run error: {message}")
                 self._run_button.config(state=tk.NORMAL)
                 self._hide_run_progress()
                 saw_terminal_event = True
@@ -1038,8 +1103,11 @@ def _row_labeled_entry(
     label: str,
     variable: tk.StringVar,
     width: int = 30,
-) -> None:
+    unit: str | None = None,
+) -> ttk.Entry:
     ttk.Label(frame, text=label).grid(row=row, column=0, sticky=tk.W, padx=4, pady=4)
-    ttk.Entry(frame, textvariable=variable, width=width).grid(
-        row=row, column=1, sticky=tk.W, padx=4, pady=4
-    )
+    entry = ttk.Entry(frame, textvariable=variable, width=width)
+    entry.grid(row=row, column=1, sticky=tk.W, padx=4, pady=4)
+    if unit:
+        ttk.Label(frame, text=unit).grid(row=row, column=2, sticky=tk.W, padx=4, pady=4)
+    return entry
