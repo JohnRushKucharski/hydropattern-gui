@@ -6,23 +6,86 @@ state (:class:`GuiFormState`) and the validated domain model
 mapping from a validated config to :class:`hydropattern_gui.runner_service.RunOptions`.
 It intentionally contains no Tkinter widget code so it can be tested and
 reasoned about independently of the UI shell.
+
+The per-characteristic-kind typed field dataclasses and their metrics_text
+conversion/sync helpers (previously ~800 lines of 5x near-duplicated code
+living directly in this file) now live in the ``characteristics`` package,
+one module per kind (``characteristics/{magnitude,duration,timing,
+rate_of_change,frequency}.py``) plus a small ``characteristics/_shared.py``
+for the types/helpers they all need. Everything is re-exported here so
+existing ``from hydropattern_gui.gui_form import ...`` call sites are
+unaffected.
 """
 
 from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import cast
 
 from hydropattern.errors import HydropatternError
 from hydropattern.parsers import (
+    is_nested_frequency_shape,
     validate_duration_metrics,
     validate_frequency_metrics,
     validate_magnitude_metrics,
+    validate_nested_frequency_metrics,
     validate_rate_of_change_metrics,
     validate_timing_metrics,
 )
 
+from hydropattern_gui.characteristics._shared import (
+    _CHARACTERISTIC_KINDS,
+    CharacteristicKind,
+    CharacteristicRowState,
+    FormValidationError,
+    _metrics_to_text,
+)
+from hydropattern_gui.characteristics.duration import (
+    DurationFields,
+    DurationMode,
+    duration_fields_to_metrics,
+    duration_insertion_offset,
+    duration_metrics_from_text,
+    extract_duration_state,
+    sync_duration_row,
+)
+from hydropattern_gui.characteristics.frequency import (
+    FrequencyFields,
+    FrequencyPatternFields,
+    FrequencyPatternMode,
+    extract_frequency_state,
+    frequency_fields_to_metrics,
+    frequency_insertion_offset,
+    frequency_metrics_from_text,
+    sync_frequency_row,
+)
+from hydropattern_gui.characteristics.magnitude import (
+    MagnitudeFields,
+    MagnitudeMode,
+    extract_magnitude_state,
+    magnitude_fields_to_metrics,
+    magnitude_insertion_offset,
+    magnitude_metrics_from_text,
+    sync_magnitude_row,
+)
+from hydropattern_gui.characteristics.rate_of_change import (
+    RateOfChangeFields,
+    RateOfChangeMode,
+    extract_rate_of_change_state,
+    rate_of_change_fields_to_metrics,
+    rate_of_change_insertion_offset,
+    rate_of_change_metrics_from_text,
+    sync_rate_of_change_row,
+)
+from hydropattern_gui.characteristics.timing import (
+    TimingFields,
+    extract_timing_state,
+    sync_timing_row,
+    timing_fields_to_metrics,
+    timing_insertion_offset,
+    timing_metrics_from_text,
+)
 from hydropattern_gui.config_model import (
     ClimateCanvasPlotOptions,
     ComponentConfig,
@@ -35,27 +98,50 @@ from hydropattern_gui.config_model import (
 )
 from hydropattern_gui.runner_service import RunOptions
 
-CharacteristicKind = Literal["timing", "magnitude", "duration", "rate_of_change", "frequency"]
-_CHARACTERISTIC_KINDS: tuple[CharacteristicKind, ...] = (
-    "timing",
-    "magnitude",
-    "duration",
-    "rate_of_change",
-    "frequency",
-)
-
-
-@dataclass(frozen=True)
-class CharacteristicRowState:
-    kind: CharacteristicKind
-    metrics_text: str
-
-
-class FormValidationError(ValueError):
-    def __init__(self, field_errors: dict[str, str]) -> None:
-        self.field_errors = field_errors
-        message = "; ".join(f"{field}: {error}" for field, error in field_errors.items())
-        super().__init__(message)
+__all__ = [
+    "CharacteristicKind",
+    "CharacteristicRowState",
+    "DurationFields",
+    "DurationMode",
+    "FormValidationError",
+    "FrequencyFields",
+    "FrequencyPatternFields",
+    "FrequencyPatternMode",
+    "GuiFormState",
+    "MagnitudeFields",
+    "MagnitudeMode",
+    "RateOfChangeFields",
+    "RateOfChangeMode",
+    "TimingFields",
+    "config_from_form_state",
+    "duration_fields_to_metrics",
+    "duration_insertion_offset",
+    "duration_metrics_from_text",
+    "extract_duration_state",
+    "extract_frequency_state",
+    "extract_magnitude_state",
+    "extract_rate_of_change_state",
+    "extract_timing_state",
+    "form_state_from_config",
+    "frequency_fields_to_metrics",
+    "frequency_insertion_offset",
+    "frequency_metrics_from_text",
+    "magnitude_fields_to_metrics",
+    "magnitude_insertion_offset",
+    "magnitude_metrics_from_text",
+    "rate_of_change_fields_to_metrics",
+    "rate_of_change_insertion_offset",
+    "rate_of_change_metrics_from_text",
+    "run_options_from_config",
+    "sync_duration_row",
+    "sync_frequency_row",
+    "sync_magnitude_row",
+    "sync_rate_of_change_row",
+    "sync_timing_row",
+    "timing_fields_to_metrics",
+    "timing_insertion_offset",
+    "timing_metrics_from_text",
+]
 
 
 @dataclass
@@ -288,16 +374,6 @@ def _parse_ticks(raw: str, field_name: str) -> list[float]:
     return values
 
 
-def _metrics_to_text(metrics: list[object]) -> str:
-    rendered_parts: list[str] = []
-    for item in metrics:
-        if isinstance(item, str):
-            rendered_parts.append(f'"{item}"')
-        else:
-            rendered_parts.append(str(item))
-    return f"[{', '.join(rendered_parts)}]"
-
-
 def _validate_characteristic_metrics(kind: CharacteristicKind, metrics: list[object]) -> None:
     if kind == "timing":
         validate_timing_metrics(metrics)
@@ -308,4 +384,10 @@ def _validate_characteristic_metrics(kind: CharacteristicKind, metrics: list[obj
     elif kind == "rate_of_change":
         validate_rate_of_change_metrics(metrics)
     elif kind == "frequency":
-        validate_frequency_metrics(metrics)
+        # Nested frequency ([base_list, nested_list]) uses a distinct
+        # hydropattern validator; validate_frequency_metrics alone would
+        # reject the nested shape.
+        if is_nested_frequency_shape(metrics):
+            validate_nested_frequency_metrics(metrics)
+        else:
+            validate_frequency_metrics(metrics)

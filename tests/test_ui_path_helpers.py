@@ -1,5 +1,9 @@
+from hydropattern_gui.gui_form import CharacteristicRowState
 from hydropattern_gui.ui_shell import (
     build_log_placeholder,
+    disable_characteristic,
+    enable_characteristic,
+    is_characteristic_enabled,
     mousewheel_scroll_units,
     normalize_path_for_display,
     should_enable_characteristic_row,
@@ -48,3 +52,43 @@ def test_mousewheel_scroll_units_converts_common_deltas() -> None:
     assert mousewheel_scroll_units(-120) == 1
     assert mousewheel_scroll_units(240) == -2
     assert mousewheel_scroll_units(0) == 0
+
+
+def test_is_characteristic_enabled_reflects_row_presence() -> None:
+    rows = [CharacteristicRowState(kind="timing", metrics_text="[1, 366]")]
+    assert is_characteristic_enabled(rows, "timing") is True
+    assert is_characteristic_enabled(rows, "magnitude") is False
+
+
+def test_enable_characteristic_appends_default_row_when_absent() -> None:
+    rows: list[CharacteristicRowState] = []
+    updated = enable_characteristic(rows, "magnitude", default_metrics_text='[">", 0.0]')
+    assert [row.kind for row in updated] == ["magnitude"]
+    assert updated[0].metrics_text == '[">", 0.0]'
+
+
+def test_enable_characteristic_is_a_no_op_when_already_present() -> None:
+    rows = [CharacteristicRowState(kind="magnitude", metrics_text='[">", 1.5]')]
+    updated = enable_characteristic(rows, "magnitude", default_metrics_text='[">", 0.0]')
+    assert updated == rows
+
+
+def test_enable_characteristic_preserves_existing_row_order() -> None:
+    rows = [CharacteristicRowState(kind="timing", metrics_text="[1, 366]")]
+    updated = enable_characteristic(rows, "magnitude", default_metrics_text='[">", 0.0]')
+    assert [row.kind for row in updated] == ["timing", "magnitude"]
+
+
+def test_disable_characteristic_removes_matching_row() -> None:
+    rows = [
+        CharacteristicRowState(kind="timing", metrics_text="[1, 366]"),
+        CharacteristicRowState(kind="magnitude", metrics_text='[">", 1.5]'),
+    ]
+    updated = disable_characteristic(rows, "magnitude")
+    assert [row.kind for row in updated] == ["timing"]
+
+
+def test_disable_characteristic_is_a_no_op_when_absent() -> None:
+    rows = [CharacteristicRowState(kind="timing", metrics_text="[1, 366]")]
+    updated = disable_characteristic(rows, "magnitude")
+    assert updated == rows
